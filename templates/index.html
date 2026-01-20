@@ -142,8 +142,22 @@
         }
 
         .loader {
-            width: 100px;
-            height: 100px;
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #ee5566;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
         }
 
         .blurred {
@@ -202,7 +216,7 @@
         <div class="map-container" id="map-container">
             <div id="map"></div>
             <div class="loader-container" id="loader-container">
-                <img src="{{ url_for('static', filename='loader.gif') }}" alt="Loading..." class="loader">
+                <div class="loader"></div>
             </div>
         </div>
     </div>
