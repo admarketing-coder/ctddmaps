@@ -314,6 +314,17 @@
                 }
             });
 
+            // Filter routes layer
+            if (map.getLayer('routes-layer')) {
+                var filter = ['in', 'technician'];
+                if (checkedTechnicians.length > 0) {
+                    checkedTechnicians.forEach(t => filter.push(t));
+                    map.setFilter('routes-layer', filter);
+                } else {
+                    map.setFilter('routes-layer', ['in', 'technician', '']); // Match nothing
+                }
+            }
+
             // Zoom to visible markers
             if (visibleCoordinates.length > 0) {
                 var bounds = new mapboxgl.LngLatBounds();
@@ -368,6 +379,163 @@
                     if (data.locations.length > 0) {
                         map.fitBounds(data.locations.map(item => [item.longitude, item.latitude]), { padding: 20 });
                     }
+
+                    // --- Route Logic Start ---
+                    // 1. Group coordinates by technician
+                    var techRoutes = {};
+                    data.locations.forEach(item => {
+                        var techs = item.technician.split(',').map(t => t.strip ? t.strip() : t.trim());
+                        techs.forEach(t => {
+                            if (!techRoutes[t]) {
+                                techRoutes[t] = [];
+                            }
+                            techRoutes[t].push({
+                                coords: [item.longitude, item.latitude],
+                                ticket: item.ticket_number
+                            });
+                        });
+                    });
+
+                    // 2. Get User Location and Fetch Directions
+                    if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(function (position) {
+                            var userCoords = [position.coords.longitude, position.coords.latitude];
+
+                            // Add "My Location" marker
+                            new mapboxgl.Marker({ color: 'black' })
+                                .setLngLat(userCoords)
+                                .setPopup(new mapboxgl.Popup().setHTML("<b>My Location</b>"))
+                                .addTo(map);
+
+                            fetchDirections(userCoords, techRoutes);
+                        }, function (error) {
+                            console.error("Geolocation error:", error);
+                            alert("Could not get your location. Routes will start from the first job.");
+                            // Fallback: Use first job as start or just connect jobs
+                            fetchDirections(null, techRoutes);
+                        });
+                    } else {
+                        alert("Geolocation is not supported by this browser.");
+                        fetchDirections(null, techRoutes);
+                    }
+
+                    function fetchDirections(startCoords, techRoutes) {
+                        var routeFeatures = [];
+                        var techColors = {};
+                        var distances = {}; // Store distances per technician
+
+                        var promises = Object.keys(techRoutes).map(tech => {
+                            var routeColor = "#" + Math.floor(Math.random() * 16777215).toString(16);
+                            techColors[tech] = routeColor;
+
+                            var coordinates = techRoutes[tech].map(p => p.coords);
+
+                            // Prepend start location if available
+                            if (startCoords) {
+                                coordinates.unshift(startCoords);
+                            }
+
+                            // Mapbox Directions API limit: 25 coordinates per request. 
+                            // For now, take first 25. Ideally, chunk requests.
+                            var truncatedCoords = coordinates.slice(0, 25);
+                            var coordString = truncatedCoords.map(c => c.join(',')).join(';');
+
+                            var url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordString}?geometries=geojson&access_token=${mapboxgl.accessToken}`;
+
+                            return fetch(url)
+                                .then(response => response.json())
+                                .then(data => {
+                                    if (data.routes && data.routes.length > 0) {
+                                        var route = data.routes[0];
+                                        routeFeatures.push({
+                                            'type': 'Feature',
+                                            'properties': {
+                                                'technician': tech,
+                                                'color': routeColor
+                                            },
+                                            'geometry': route.geometry
+                                        });
+                                        // Store distance in km
+                                        distances[tech] = (route.distance / 1000).toFixed(2);
+                                    }
+                                })
+                                .catch(err => console.error("Directions API Error:", err));
+                        });
+
+                        Promise.all(promises).then(() => {
+                            // Update Map Sources
+                            if (map.getSource('routes')) {
+                                map.getSource('routes').setData({
+                                    'type': 'FeatureCollection',
+                                    'features': routeFeatures
+                                });
+                            } else {
+                                map.addSource('routes', {
+                                    'type': 'geojson',
+                                    'data': {
+                                        'type': 'FeatureCollection',
+                                        'features': routeFeatures
+                                    }
+                                });
+
+                                map.addLayer({
+                                    'id': 'routes-layer',
+                                    'type': 'line',
+                                    'source': 'routes',
+                                    'layout': {
+                                        'line-join': 'round',
+                                        'line-cap': 'round'
+                                    },
+                                    'paint': {
+                                        'line-color': ['get', 'color'],
+                                        'line-width': 4,
+                                        'line-opacity': 0.8
+                                    }
+                                });
+                            }
+
+                            // Update Legend with Distances
+                            updateLegend(data.job_type_colors, distances);
+
+                            // Update Filters
+                            // Re-render technician list to include new filters potentially? 
+                            // Actually, the tech list is static based on CSV. Just trigger filter.
+                            filterMarkers();
+                        });
+                    }
+
+                    // Helper to update legend
+                    function updateLegend(jobColors, techDistances) {
+                        var legendList = document.getElementById('legend-list');
+                        legendList.innerHTML = '';
+
+                        // Job Types
+                        var jobHeader = document.createElement('li');
+                        jobHeader.innerHTML = '<strong>Job Types</strong>';
+                        legendList.appendChild(jobHeader);
+
+                        Object.keys(jobColors).forEach(jobType => {
+                            var color = jobColors[jobType];
+                            var legendItem = document.createElement('li');
+                            legendItem.innerHTML = `<span style="background-color: ${color}; width: 15px; height: 15px; display: inline-block; margin-right: 5px;"></span>${jobType}`;
+                            legendList.appendChild(legendItem);
+                        });
+
+                        // Tech Distances
+                        if (Object.keys(techDistances).length > 0) {
+                            var distHeader = document.createElement('li');
+                            distHeader.innerHTML = '<br><strong>Technician Routes</strong>';
+                            legendList.appendChild(distHeader);
+
+                            Object.keys(techDistances).forEach(tech => {
+                                var dist = techDistances[tech];
+                                var item = document.createElement('li');
+                                item.innerHTML = `${tech}: ${dist} km`;
+                                legendList.appendChild(item);
+                            });
+                        }
+                    }
+                    // --- Route Logic End ---
 
                     // Handle Technician Filter
                     var technicianList = document.getElementById('technician-list');
