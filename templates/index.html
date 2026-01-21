@@ -253,11 +253,30 @@
                 .setLngLat(coordinates)
                 .setPopup(new mapboxgl.Popup().setHTML(popupContent))
                 .addTo(map);
-            marker.getElement().addEventListener('click', function () {
-                // Set the global selected marker
-                window.selectedMarker = marker;
-                // Update the color picker to match the current marker color
-                document.getElementById('marker-color').value = color;
+            marker.getElement().addEventListener('click', function (e) {
+                // Prevent click from propagating to map (optional, but good practice if map has click listeners)
+                e.stopPropagation();
+
+                // Toggle Zoom Logic
+                if (window.selectedMarker === marker && window.isZoomedIn) {
+                    // Zoom out
+                    filterMarkers(); // This function already calculates visible bounds and fits map to them
+                    window.isZoomedIn = false;
+                    window.selectedMarker = null; // Deselect
+                } else {
+                    // Deep Zoom in
+                    map.flyTo({
+                        center: coordinates,
+                        zoom: 17,
+                        essential: true // this animation is considered essential with respect to prefers-reduced-motion
+                    });
+
+                    window.selectedMarker = marker;
+                    window.isZoomedIn = true;
+
+                    // Update the color picker to match the current marker color
+                    document.getElementById('marker-color').value = color;
+                }
             });
 
             return marker;
