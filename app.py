@@ -58,7 +58,16 @@ def process_csv():
         else:
             print(f"Geocoding request failed with status code {response.status_code}")
 
-    return jsonify({'locations': locations, 'job_type_colors': job_type_colors})
+    # Extract unique technicians
+    technicians = set()
+    for tech_entry in df['Technician(s)'].fillna('Unknown'):
+        # Split by comma in case of multiple technicians and strip whitespace
+        for t in str(tech_entry).split(','):
+            technicians.add(t.strip())
+    
+    technicians = sorted(list(technicians))
+
+    return jsonify({'locations': locations, 'job_type_colors': job_type_colors, 'technicians': technicians})
 
 if __name__ == '__main__':
     app.run(debug=True)

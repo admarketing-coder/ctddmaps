@@ -186,11 +186,7 @@
             <div class="header">
                 <h1>Welcome to My CTDD Map</h1>
             </div>
-            <div id="legend"
-                style="position: absolute; bottom: 30px; left: 10px; background: white; padding: 10px; border-radius: 5px;">
-                <h3>Legend</h3>
-                <ul id="legend-list" style="list-style-type: none; padding-left: 0;"></ul>
-            </div>
+
 
             <form id="upload-form" action="/process_csv" method="post" enctype="multipart/form-data">
                 <div class="form-group">
@@ -211,10 +207,22 @@
                 <input type="text" id="ticket-search" placeholder="Enter ticket number">
                 <button id="search-ticket">Search</button>
             </div>
+
+            <div class="technician-filter form-group" id="technician-filter" style="display: none;">
+                <label>Filter by Technician:</label>
+                <div id="technician-list"
+                    style="max-height: 200px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
+                </div>
+            </div>
         </div>
 
         <div class="map-container" id="map-container">
             <div id="map"></div>
+            <div id="legend"
+                style="position: absolute; bottom: 30px; left: 10px; background: white; padding: 10px; border-radius: 5px; z-index: 10; font-size: 14px; box-shadow: 0 0 10px rgba(0,0,0,0.2);">
+                <h3 style="margin-top: 0; font-size: 16px;">Legend</h3>
+                <ul id="legend-list" style="list-style-type: none; padding-left: 0;"></ul>
+            </div>
             <div class="loader-container" id="loader-container">
                 <div class="loader"></div>
             </div>
@@ -255,6 +263,30 @@
             return marker;
         }
 
+        var allMarkersData = []; // Store marker data for filtering
+
+        function filterMarkers() {
+            var checkedTechnicians = Array.from(document.querySelectorAll('input[name="technician"]:checked')).map(cb => cb.value);
+
+            // Filter markers
+            Object.values(markers).forEach(markerObj => {
+                var marker = markerObj.marker;
+                var technician = markerObj.technician;
+
+                // Check if any of the marker's technicians (split by comma) are in the checked list
+                var markerTechnicians = technician.split(',').map(t => t.strip ? t.strip() : t.trim());
+
+                // If any of the marker's technicians are selected, show the marker
+                var isVisible = markerTechnicians.some(t => checkedTechnicians.includes(t));
+
+                if (isVisible) {
+                    marker.getElement().style.display = 'block';
+                } else {
+                    marker.getElement().style.display = 'none';
+                }
+            });
+        }
+
         document.getElementById('upload-form').onsubmit = function (event) {
             event.preventDefault();
             document.getElementById('loader-container').style.display = 'flex';
@@ -280,7 +312,12 @@
 
                         var marker = createMarker(color, coordinates, popupContent);
 
-                        markers[item.ticket_number] = marker;
+
+
+                        markers[item.ticket_number] = {
+                            marker: marker,
+                            technician: item.technician
+                        };
                     });
 
                     // Update the legend
@@ -296,6 +333,60 @@
                     if (data.locations.length > 0) {
                         map.fitBounds(data.locations.map(item => [item.longitude, item.latitude]), { padding: 20 });
                     }
+
+                    // Handle Technician Filter
+                    var technicianList = document.getElementById('technician-list');
+                    technicianList.innerHTML = ''; // Clear previous
+                    document.getElementById('technician-filter').style.display = 'flex';
+
+                    // "Select All" Checkbox
+                    var selectAllContainer = document.createElement('div');
+                    var selectAllCb = document.createElement('input');
+                    selectAllCb.type = 'checkbox';
+                    selectAllCb.id = 'select-all-techs';
+                    selectAllCb.checked = true;
+                    selectAllCb.onclick = function () {
+                        var cbs = document.querySelectorAll('input[name="technician"]');
+                        cbs.forEach(cb => cb.checked = this.checked);
+                        filterMarkers();
+                    };
+                    var selectAllLabel = document.createElement('label');
+                    selectAllLabel.htmlFor = 'select-all-techs';
+                    selectAllLabel.innerText = 'Select All';
+                    selectAllLabel.style.fontWeight = 'normal';
+                    selectAllLabel.style.marginLeft = '5px';
+
+                    selectAllContainer.appendChild(selectAllCb);
+                    selectAllContainer.appendChild(selectAllLabel);
+                    technicianList.appendChild(selectAllContainer);
+
+                    data.technicians.forEach(tech => {
+                        var div = document.createElement('div');
+                        var cb = document.createElement('input');
+                        cb.type = 'checkbox';
+                        cb.name = 'technician';
+                        cb.value = tech;
+                        cb.id = 'tech-' + tech;
+                        cb.checked = true;
+                        cb.onchange = function () {
+                            filterMarkers();
+                            // Update "Select All" status
+                            var all = document.querySelectorAll('input[name="technician"]');
+                            var allChecked = document.querySelectorAll('input[name="technician"]:checked');
+                            document.getElementById('select-all-techs').checked = all.length === allChecked.length;
+                        };
+
+                        var label = document.createElement('label');
+                        label.htmlFor = 'tech-' + tech;
+                        label.innerText = tech;
+                        label.style.fontWeight = 'normal';
+                        label.style.marginLeft = '5px';
+
+                        div.appendChild(cb);
+                        div.appendChild(label);
+                        technicianList.appendChild(div);
+                    });
+
                 })
                 .catch(error => {
                     document.getElementById('loader-container').style.display = 'none';
@@ -327,14 +418,19 @@
         document.getElementById('search-ticket').onclick = function () {
             var searchValue = document.getElementById('ticket-search').value;
             if (searchValue === '') {
-                Object.values(markers).forEach(marker => marker.getElement().style.display = 'block');
+                // If search is cleared, re-apply the filter
+                filterMarkers();
             } else {
                 Object.keys(markers).forEach(ticketNumber => {
+                    var markerObj = markers[ticketNumber];
                     if (ticketNumber === searchValue) {
-                        markers[ticketNumber].getElement().style.display = 'block';
-                        markers[ticketNumber].togglePopup();
+                        markerObj.marker.getElement().style.display = 'block';
+                        markerObj.marker.togglePopup();
                     } else {
-                        markers[ticketNumber].getElement().style.display = 'none';
+                        // Decide if we should hide based on search logic. 
+                        // Usually search overrides filter, or filters within search.
+                        // Here, simplistic: show ONLY the match.
+                        markerObj.marker.getElement().style.display = 'none';
                     }
                 });
             }
