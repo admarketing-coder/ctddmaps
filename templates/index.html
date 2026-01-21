@@ -263,6 +263,7 @@
                     filterMarkers(); // This function already calculates visible bounds and fits map to them
                     window.isZoomedIn = false;
                     window.selectedMarker = null; // Deselect
+                    marker.getPopup().remove(); // Close popup when zooming out
                 } else {
                     // Deep Zoom in
                     map.flyTo({
@@ -276,6 +277,11 @@
 
                     // Update the color picker to match the current marker color
                     document.getElementById('marker-color').value = color;
+
+                    // Ensure popup is open
+                    if (!marker.getPopup().isOpen()) {
+                        marker.togglePopup();
+                    }
                 }
             });
 
